@@ -1,11 +1,13 @@
-import cv2
+import cv2, os
+from dotenv import load_dotenv
 
-# Replace with your camera stream URL
-# Examples:
-# RTSP: rtsp://username:password@192.168.1.100:554/stream
-# HTTP/MJPEG: http://192.168.1.100:8080/video
+load_dotenv()
 
-stream_url = ""
+username = os.getenv("CAMERA_USER")
+password = os.getenv("CAMERA_PASSWORD")
+ip = os.getenv("CAMERA_IP")
+
+stream_url = f"rtsps://{username}:{password}@{ip}:554/video/live?channel=1&subtype=1"
 
 # Open the video stream
 cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
