@@ -37,8 +37,21 @@ while True:
 
     if not ret:
         break
+
+    # frame = cv2.GaussianBlur(frame, (5,5), 0)
+
+    mask = fgbg.apply(frame)
+
+    # _, mask = cv2.threshold(mask, 200, 255, cv2.THRESH_BINARY)
+
+    kernel = np.ones((3,3), np.uint8)
+
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
     fgmask = fgbg.apply(frame)
-    cv2.imshow("MOG2", fgmask)
+    cv2.imshow("MOG2", mask)
     cv2.imshow("Camera", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
