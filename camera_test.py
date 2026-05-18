@@ -1,5 +1,8 @@
 import cv2, os
 from dotenv import load_dotenv
+import gradio as gr
+import numpy as np
+import matplotlib.pyplot as plt
 
 load_dotenv()
 
@@ -9,8 +12,14 @@ ip = os.getenv("CAMERA_IP")
 
 stream_url = f"rtsps://{username}:{password}@{ip}:554/video/live?channel=1&subtype=1"
 
-# Open the video stream
-cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
+# # Open the video stream
+# cap = cv2.VideoCapture(stream_url, cv2.CAP_FFMPEG)
+
+# inbuilt camera -- 0
+cap = cv2.VideoCapture(0)
+
+fgbg =cv2.createBackgroundSubtractorMOG2() #- part of core OpenCV, no need for contrib version. can use bgsegm as well
+
 
 if not cap.isOpened():
     print("Error: Could not open video stream")
@@ -28,11 +37,13 @@ while True:
 
     if not ret:
         break
-
+    fgmask = fgbg.apply(frame)
+    cv2.imshow("MOG2", fgmask)
     cv2.imshow("Camera", frame)
 
-    if cv2.waitKey(1) == ord('q'):
+    if cv2.waitKey(1) & 0xFF == ord('q'):
         break
+    
 
 cap.release()
 cv2.destroyAllWindows()
