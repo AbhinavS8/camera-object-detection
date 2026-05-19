@@ -75,11 +75,11 @@ last_visible_objects_print_time = 0.0
 in_count = 0
 out_count = 0
 
-edge_margin_ratio = 0.10
-min_track_time = 0.5
+edge_margin_ratio = 0.01
+min_track_time = 0.3
 min_inside_frames = 2
-min_exit_track_time = 1.0
-max_disappeared_time = 2.0
+min_exit_track_time = 0.8
+max_disappeared_time = 1.5
 
 # ----------------------------
 # Main Loop
