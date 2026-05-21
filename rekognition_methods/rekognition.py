@@ -17,14 +17,13 @@ PROJECT_VERSION_ARN = (
     "arn:aws:rekognition:ap-south-1:364598914440:project/package-recognition/version/package-recognition.2026-05-21T12.01.54/1779345114953"
 )
 
-TEST_FOLDER = "test"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-OUTPUT_FOLDER = "output"
+TEST_FOLDER = os.path.join(BASE_DIR, "test")
+
+OUTPUT_FOLDER = os.path.join(BASE_DIR, "output")
 
 MIN_CONFIDENCE = 20
-
-# Create output folder
-os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
 # ----------------------------
 # Supported Image Extensions
@@ -35,76 +34,36 @@ VALID_EXTENSIONS = (
     ".png"
 )
 
-# ----------------------------
-# Process All Images
-# ----------------------------
-for filename in os.listdir(TEST_FOLDER):
-
-    if not filename.lower().endswith(VALID_EXTENSIONS):
-        continue
-
-    image_path = os.path.join(
-        TEST_FOLDER,
-        filename
-    )
-
-    print(f"\nProcessing: {filename}")
-
-    # ----------------------------
-    # Read Image Bytes
-    # ----------------------------
-    with open(image_path, "rb") as image:
-
-        image_bytes = image.read()
-
-    # ----------------------------
-    # Run Detection
-    # ----------------------------
-    response = client.detect_custom_labels(
-
+def detect_custom_labels_from_bytes(image_bytes):
+    return client.detect_custom_labels(
         ProjectVersionArn=PROJECT_VERSION_ARN,
-
         Image={
             "Bytes": image_bytes
         },
-
         MinConfidence=MIN_CONFIDENCE
     )
 
-    # ----------------------------
-    # Load Image with OpenCV
-    # ----------------------------
-    frame = cv2.imread(image_path)
 
+def draw_custom_labels(frame, custom_labels):
     height, width = frame.shape[:2]
 
-    # ----------------------------
-    # Draw Bounding Boxes
-    # ----------------------------
-    for label in response["CustomLabels"]:
+    for label in custom_labels:
+        if "Geometry" not in label or "BoundingBox" not in label["Geometry"]:
+            continue
 
         name = label["Name"]
-
         confidence = label["Confidence"]
-
         box = label["Geometry"]["BoundingBox"]
 
-        # Convert normalized coordinates
+        # Convert normalized Rekognition coordinates to frame pixels.
         left = int(box["Left"] * width)
-
         top = int(box["Top"] * height)
-
         box_width = int(box["Width"] * width)
-
         box_height = int(box["Height"] * height)
 
         right = left + box_width
-
         bottom = top + box_height
 
-        # ----------------------------
-        # Draw Rectangle
-        # ----------------------------
         cv2.rectangle(
             frame,
             (left, top),
@@ -113,39 +72,64 @@ for filename in os.listdir(TEST_FOLDER):
             2
         )
 
-        # ----------------------------
-        # Draw Label Text
-        # ----------------------------
         text = f"{name}: {confidence:.1f}%"
+        text_y = max(top - 10, 20)
 
         cv2.putText(
             frame,
             text,
-            (left, top - 10),
+            (left, text_y),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
             (0, 255, 0),
             2
         )
 
-        print(
-            f"Detected {name} "
-            f"({confidence:.1f}%)"
+    return frame
+
+
+def process_images():
+    os.makedirs(OUTPUT_FOLDER, exist_ok=True)
+
+    for filename in os.listdir(TEST_FOLDER):
+        if not filename.lower().endswith(VALID_EXTENSIONS):
+            continue
+
+        image_path = os.path.join(
+            TEST_FOLDER,
+            filename
         )
 
-    # ----------------------------
-    # Save Output Image
-    # ----------------------------
-    output_path = os.path.join(
-        OUTPUT_FOLDER,
-        filename
-    )
+        print(f"\nProcessing: {filename}")
 
-    cv2.imwrite(
-        output_path,
-        frame
-    )
+        with open(image_path, "rb") as image:
+            image_bytes = image.read()
 
-    print(f"Saved: {output_path}")
+        response = detect_custom_labels_from_bytes(image_bytes)
 
-print("\nDone.")
+        frame = cv2.imread(image_path)
+        draw_custom_labels(frame, response["CustomLabels"])
+
+        for label in response["CustomLabels"]:
+            print(
+                f"Detected {label['Name']} "
+                f"({label['Confidence']:.1f}%)"
+            )
+
+        output_path = os.path.join(
+            OUTPUT_FOLDER,
+            filename
+        )
+
+        cv2.imwrite(
+            output_path,
+            frame
+        )
+
+        print(f"Saved: {output_path}")
+
+    print("\nDone.")
+
+
+if __name__ == "__main__":
+    process_images()
