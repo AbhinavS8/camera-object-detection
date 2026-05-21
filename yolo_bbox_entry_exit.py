@@ -1,5 +1,5 @@
-import cv2
-import time
+import os, cv2, time
+from dotenv import load_dotenv
 from ultralytics import YOLO
 
 
@@ -38,9 +38,15 @@ model = YOLO("yolov8n.pt")
 # Webcam:
 cap = cv2.VideoCapture(0)
 
-# RTSPS Example:
+# # RTSPS:
+
+# load_dotenv()
+
+# username = os.getenv("CAMERA_USER")
+# password = os.getenv("CAMERA_PASSWORD")
+# ip = os.getenv("CAMERA_IP")
 # cap = cv2.VideoCapture(
-#     "rtsps://user:password@ip:554/cam/realmonitor?channel=1&subtype=1"
+#     f"rtsps://{username}:{password}@{ip}:554/video/live?channel=1&subtype=1"
 # )
 
 if not cap.isOpened():
