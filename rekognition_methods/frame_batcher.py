@@ -14,6 +14,7 @@ FRAME_HEIGHT = 720
 
 @dataclass
 class CapturedFrame:
+    run_id: str
     sequence_id: int
     batch_id: int
     batch_index: int
@@ -24,6 +25,7 @@ class CapturedFrame:
 
 @dataclass
 class FrameBatch:
+    run_id: str
     batch_id: int
     created_at_epoch: float
     created_at_utc: str
@@ -36,6 +38,10 @@ def utc_timestamp():
         .isoformat(timespec="milliseconds")
         .replace("+00:00", "Z")
     )
+
+
+def safe_timestamp(value):
+    return value.replace(":", "").replace(".", "-")
 
 
 class FrameBatcher:
@@ -52,60 +58,73 @@ class FrameBatcher:
         self.sample_interval_seconds = sample_interval_seconds
         self.frame_width = frame_width
         self.frame_height = frame_height
+        self.run_id = safe_timestamp(utc_timestamp())
 
-    def capture_batches(self, stop_event):
+    def capture_frames(self, stop_event):
         cap = cv2.VideoCapture(self.camera_index)
 
         if not cap.isOpened():
             raise RuntimeError("Could not open webcam")
 
         sequence_id = 0
-        batch_id = 0
         next_sample_time = time.monotonic()
 
         try:
             while not stop_event.is_set():
-                frames = []
+                now = time.monotonic()
 
-                while (
-                    len(frames) < self.batch_size and
-                    not stop_event.is_set()
-                ):
-                    now = time.monotonic()
+                if now < next_sample_time:
+                    time.sleep(min(0.01, next_sample_time - now))
+                    continue
 
-                    if now < next_sample_time:
-                        time.sleep(min(0.01, next_sample_time - now))
-                        continue
+                ret, frame = cap.read()
 
-                    ret, frame = cap.read()
+                if not ret:
+                    raise RuntimeError("Could not read frame")
 
-                    if not ret:
-                        raise RuntimeError("Could not read frame")
-
-                    frame = cv2.resize(
-                        frame,
-                        (self.frame_width, self.frame_height)
-                    )
-                    frames.append(
-                        CapturedFrame(
-                            sequence_id=sequence_id,
-                            batch_id=batch_id,
-                            batch_index=len(frames),
-                            captured_at_epoch=time.time(),
-                            captured_at_utc=utc_timestamp(),
-                            frame=frame.copy()
-                        )
-                    )
-                    sequence_id += 1
-                    next_sample_time += self.sample_interval_seconds
-
-                if frames:
-                    yield FrameBatch(
-                        batch_id=batch_id,
-                        created_at_epoch=time.time(),
-                        created_at_utc=utc_timestamp(),
-                        frames=frames
-                    )
-                    batch_id += 1
+                frame = cv2.resize(
+                    frame,
+                    (self.frame_width, self.frame_height)
+                )
+                yield CapturedFrame(
+                    run_id=self.run_id,
+                    sequence_id=sequence_id,
+                    batch_id=sequence_id // self.batch_size,
+                    batch_index=sequence_id % self.batch_size,
+                    captured_at_epoch=time.time(),
+                    captured_at_utc=utc_timestamp(),
+                    frame=frame.copy()
+                )
+                sequence_id += 1
+                next_sample_time += self.sample_interval_seconds
         finally:
             cap.release()
+
+    def capture_batches(self, stop_event):
+        frames = []
+        batch_id = 0
+
+        for captured_frame in self.capture_frames(stop_event):
+            frames.append(captured_frame)
+
+            if len(frames) < self.batch_size:
+                continue
+
+            yield FrameBatch(
+                run_id=self.run_id,
+                batch_id=batch_id,
+                created_at_epoch=time.time(),
+                created_at_utc=utc_timestamp(),
+                frames=frames
+            )
+            frames = []
+            batch_id += 1
+
+        if frames:
+            yield FrameBatch(
+                run_id=self.run_id,
+                batch_id=batch_id,
+                created_at_epoch=time.time(),
+                created_at_utc=utc_timestamp(),
+                frames=frames
+            )

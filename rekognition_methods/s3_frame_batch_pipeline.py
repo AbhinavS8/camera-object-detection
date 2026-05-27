@@ -1,23 +1,29 @@
 import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 
 try:
     from frame_batcher import (
         BATCH_SIZE,
+        FrameBatch,
         FRAME_HEIGHT,
         FRAME_WIDTH,
         SAMPLE_INTERVAL_SECONDS,
-        FrameBatcher
+        FrameBatcher,
+        utc_timestamp
     )
     from s3_batch_uploader import S3BatchUploader
 except ImportError:
     from .frame_batcher import (
         BATCH_SIZE,
+        FrameBatch,
         FRAME_HEIGHT,
         FRAME_WIDTH,
         SAMPLE_INTERVAL_SECONDS,
-        FrameBatcher
+        FrameBatcher,
+        utc_timestamp
     )
     from .s3_batch_uploader import S3BatchUploader
 
@@ -25,10 +31,32 @@ except ImportError:
 WINDOW_NAME = "S3 Frame Batch Upload"
 
 
-def draw_upload_status(frame, batch, uploaded_batch=None, error=None):
+def create_batch(frames):
+    batch_id = frames[0].batch_id
+
+    return FrameBatch(
+        run_id=frames[0].run_id,
+        batch_id=batch_id,
+        created_at_epoch=time.time(),
+        created_at_utc=utc_timestamp(),
+        frames=frames
+    )
+
+
+def draw_upload_status(
+    frame,
+    captured_frame,
+    buffered_count,
+    upload_status="Ready",
+    uploaded_batch=None,
+    error=None
+):
     output_frame = frame.copy()
     status = (
-        f"Batch {batch.batch_id} | {len(batch.frames)}/{BATCH_SIZE} frames | "
+        f"Frame {captured_frame.sequence_id} | "
+        f"Run {captured_frame.run_id} | "
+        f"Batch {captured_frame.batch_id} | "
+        f"{buffered_count}/{BATCH_SIZE} buffered | "
         f"{SAMPLE_INTERVAL_SECONDS:.1f}s sample"
     )
     cv2.putText(
@@ -48,7 +76,7 @@ def draw_upload_status(frame, batch, uploaded_batch=None, error=None):
         upload_text = f"Upload error: {error}"
         color = (0, 0, 255)
     else:
-        upload_text = "Uploading batch to S3..."
+        upload_text = upload_status
         color = (0, 165, 255)
 
     cv2.putText(
@@ -68,48 +96,82 @@ def main():
     stop_event = threading.Event()
     batcher = FrameBatcher()
     uploader = S3BatchUploader()
+    frame_buffer = []
+    in_flight_upload = None
+    upload_status = "Ready"
+    uploaded_batch = None
+    upload_error = None
 
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
     cv2.resizeWindow(WINDOW_NAME, FRAME_WIDTH, FRAME_HEIGHT)
 
-    try:
-        for batch in batcher.capture_batches(stop_event):
-            preview_frame = batch.frames[-1].frame
-            cv2.imshow(WINDOW_NAME, draw_upload_status(preview_frame, batch))
-            cv2.waitKey(1)
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        try:
+            for captured_frame in batcher.capture_frames(stop_event):
+                frame_buffer.append(captured_frame)
 
-            print(
-                f"Uploading batch {batch.batch_id} "
-                f"({len(batch.frames)} frames) created at {batch.created_at_utc}"
-            )
+                if in_flight_upload and in_flight_upload.done():
+                    uploaded_batch = None
+                    upload_error = None
 
-            try:
-                uploaded_batch = uploader.upload_batch(batch)
-                print(
-                    f"Uploaded batch {uploaded_batch.batch_id}: "
-                    f"{uploaded_batch.manifest_key}"
-                )
+                    try:
+                        uploaded_batch = in_flight_upload.result()
+                        upload_status = (
+                            f"Uploaded batch {uploaded_batch.batch_id}"
+                        )
+                        print(
+                            f"Uploaded batch {uploaded_batch.batch_id}: "
+                            f"{uploaded_batch.manifest_key}"
+                        )
+                    except Exception as exc:
+                        upload_error = exc
+                        upload_status = "Upload failed"
+                        print(f"Upload failed: {exc}")
+
+                    in_flight_upload = None
+
+                if (
+                    len(frame_buffer) >= BATCH_SIZE and
+                    in_flight_upload is None
+                ):
+                    batch_frames = frame_buffer[:BATCH_SIZE]
+                    del frame_buffer[:BATCH_SIZE]
+                    batch = create_batch(batch_frames)
+                    upload_status = f"Uploading batch {batch.batch_id} to S3..."
+                    uploaded_batch = None
+                    upload_error = None
+
+                    print(
+                        f"Uploading batch {batch.batch_id} "
+                        f"({len(batch.frames)} frames) created at "
+                        f"{batch.created_at_utc}"
+                    )
+                    in_flight_upload = executor.submit(
+                        uploader.upload_batch,
+                        batch
+                    )
+
                 output_frame = draw_upload_status(
-                    preview_frame,
-                    batch,
-                    uploaded_batch=uploaded_batch
+                    captured_frame.frame,
+                    captured_frame,
+                    len(frame_buffer),
+                    upload_status=upload_status,
+                    uploaded_batch=uploaded_batch,
+                    error=upload_error
                 )
-            except Exception as exc:
-                print(f"Upload failed for batch {batch.batch_id}: {exc}")
-                output_frame = draw_upload_status(
-                    preview_frame,
-                    batch,
-                    error=exc
-                )
+                cv2.imshow(WINDOW_NAME, output_frame)
 
-            cv2.imshow(WINDOW_NAME, output_frame)
-
-            if cv2.waitKey(1) & 0xFF == ord("q"):
-                stop_event.set()
-                break
-    finally:
-        stop_event.set()
-        cv2.destroyAllWindows()
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    stop_event.set()
+                    break
+        finally:
+            if in_flight_upload:
+                try:
+                    in_flight_upload.result()
+                except Exception as exc:
+                    print(f"Upload failed while shutting down: {exc}")
+            stop_event.set()
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

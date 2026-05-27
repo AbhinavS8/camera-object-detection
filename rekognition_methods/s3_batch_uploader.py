@@ -14,6 +14,7 @@ JPEG_QUALITY = int(os.getenv("S3_FRAME_JPEG_QUALITY", "85"))
 
 @dataclass
 class UploadedFrame:
+    run_id: str
     sequence_id: int
     batch_id: int
     batch_index: int
@@ -25,6 +26,7 @@ class UploadedFrame:
 
 @dataclass
 class UploadedBatch:
+    run_id: str
     batch_id: int
     created_at_epoch: float
     created_at_utc: str
@@ -65,6 +67,7 @@ class S3BatchUploader:
                 Body=image_bytes,
                 ContentType="image/jpeg",
                 Metadata={
+                    "run-id": captured_frame.run_id,
                     "batch-id": str(captured_frame.batch_id),
                     "batch-index": str(captured_frame.batch_index),
                     "sequence-id": str(captured_frame.sequence_id),
@@ -75,6 +78,7 @@ class S3BatchUploader:
 
             uploaded_frames.append(
                 UploadedFrame(
+                    run_id=captured_frame.run_id,
                     sequence_id=captured_frame.sequence_id,
                     batch_id=captured_frame.batch_id,
                     batch_index=captured_frame.batch_index,
@@ -93,12 +97,14 @@ class S3BatchUploader:
             Body=json.dumps(manifest, indent=2).encode("utf-8"),
             ContentType="application/json",
             Metadata={
+                "run-id": batch.run_id,
                 "batch-id": str(batch.batch_id),
                 "created-at-utc": batch.created_at_utc
             }
         )
 
         return UploadedBatch(
+            run_id=batch.run_id,
             batch_id=batch.batch_id,
             created_at_epoch=batch.created_at_epoch,
             created_at_utc=batch.created_at_utc,
@@ -126,6 +132,7 @@ class S3BatchUploader:
 
         return (
             f"{self.prefix}/"
+            f"run_{batch.run_id}/"
             f"batch_{batch.batch_id:08d}_{batch_time}/"
             f"seq_{captured_frame.sequence_id:012d}_"
             f"idx_{captured_frame.batch_index:02d}_"
@@ -137,12 +144,14 @@ class S3BatchUploader:
 
         return (
             f"{self.prefix}/"
+            f"run_{batch.run_id}/"
             f"batch_{batch.batch_id:08d}_{batch_time}/"
             f"manifest.json"
         )
 
     def _create_manifest(self, batch, uploaded_frames, manifest_key):
         return {
+            "run_id": batch.run_id,
             "batch_id": batch.batch_id,
             "created_at_epoch": batch.created_at_epoch,
             "created_at_utc": batch.created_at_utc,
@@ -151,6 +160,7 @@ class S3BatchUploader:
             "manifest_key": manifest_key,
             "frames": [
                 {
+                    "run_id": frame.run_id,
                     "sequence_id": frame.sequence_id,
                     "batch_id": frame.batch_id,
                     "batch_index": frame.batch_index,
