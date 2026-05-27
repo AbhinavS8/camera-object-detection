@@ -4,7 +4,10 @@ from dataclasses import dataclass
 
 import boto3
 import cv2
+from dotenv import load_dotenv
 
+
+load_dotenv()
 
 AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
 S3_BUCKET_ENV = "S3_FRAME_BUCKET"

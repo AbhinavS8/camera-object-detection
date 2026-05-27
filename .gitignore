@@ -1,2 +1,13 @@
 .env
 aws/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Generated outputs
+output/
+rekognition_methods/output/
