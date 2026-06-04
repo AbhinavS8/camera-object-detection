@@ -7,12 +7,42 @@ import cv2
 from dotenv import load_dotenv
 
 
-load_dotenv()
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
 
-AWS_REGION = os.getenv("AWS_REGION", "ap-south-1")
 S3_BUCKET_ENV = "S3_FRAME_BUCKET"
-S3_PREFIX = os.getenv("S3_FRAME_PREFIX", "camera-frames")
-JPEG_QUALITY = int(os.getenv("S3_FRAME_JPEG_QUALITY", "85"))
+AWS_REGION_ENV = "AWS_REGION"
+AWS_DEFAULT_REGION_ENV = "AWS_DEFAULT_REGION"
+S3_PREFIX_ENV = "S3_FRAME_PREFIX"
+JPEG_QUALITY_ENV = "S3_FRAME_JPEG_QUALITY"
+
+
+def get_env_value(name, default=None):
+    value = os.getenv(name)
+    if value is None or value.strip() == "":
+        return default
+
+    return value
+
+
+def get_aws_region(region_name=None):
+    return (
+        region_name or
+        get_env_value(AWS_REGION_ENV) or
+        get_env_value(AWS_DEFAULT_REGION_ENV) or
+        "ap-south-1"
+    )
+
+
+def get_s3_prefix(prefix=None):
+    return (prefix or get_env_value(S3_PREFIX_ENV, "input")).strip("/")
+
+
+def get_jpeg_quality(jpeg_quality=None):
+    if jpeg_quality is not None:
+        return jpeg_quality
+
+    return int(get_env_value(JPEG_QUALITY_ENV, "85"))
 
 
 @dataclass
@@ -43,19 +73,26 @@ class S3BatchUploader:
     def __init__(
         self,
         bucket_name=None,
-        prefix=S3_PREFIX,
-        region_name=AWS_REGION,
-        jpeg_quality=JPEG_QUALITY
+        prefix=None,
+        region_name=None,
+        jpeg_quality=None
     ):
-        self.bucket_name = bucket_name or os.getenv(S3_BUCKET_ENV)
-        self.prefix = prefix.strip("/")
-        self.jpeg_quality = jpeg_quality
-        self.client = boto3.client("s3", region_name=region_name)
+        self.bucket_name = bucket_name or get_env_value(S3_BUCKET_ENV)
+        self.prefix = get_s3_prefix(prefix)
+        self.jpeg_quality = get_jpeg_quality(jpeg_quality)
+        self.region_name = get_aws_region(region_name)
+        self.client = boto3.client("s3", region_name=self.region_name)
 
         if not self.bucket_name:
             raise RuntimeError(
                 f"Set {S3_BUCKET_ENV} to the destination S3 bucket name."
             )
+
+        print(
+            "S3 upload target: "
+            f"s3://{self.bucket_name}/{self.prefix}/ "
+            f"region={self.region_name}"
+        )
 
     def upload_batch(self, batch):
         uploaded_frames = []
@@ -130,14 +167,12 @@ class S3BatchUploader:
         return buffer.tobytes()
 
     def _frame_key(self, batch, captured_frame):
-        batch_time = batch.created_at_utc.replace(":", "").replace(".", "-")
         frame_time = captured_frame.captured_at_utc.replace(":", "").replace(".", "-")
 
         return (
             f"{self.prefix}/"
-            f"run_{batch.run_id}/"
-            f"batch_{batch.batch_id:08d}_{batch_time}/"
             f"seq_{captured_frame.sequence_id:012d}_"
+            f"batch_{captured_frame.batch_id:08d}_"
             f"idx_{captured_frame.batch_index:02d}_"
             f"{frame_time}.jpg"
         )
@@ -147,9 +182,7 @@ class S3BatchUploader:
 
         return (
             f"{self.prefix}/"
-            f"run_{batch.run_id}/"
-            f"batch_{batch.batch_id:08d}_{batch_time}/"
-            f"manifest.json"
+            f"manifest_batch_{batch.batch_id:08d}_{batch_time}.json"
         )
 
     def _create_manifest(self, batch, uploaded_frames, manifest_key):

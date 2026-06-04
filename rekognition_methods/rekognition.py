@@ -1,24 +1,35 @@
 import os
 import boto3
 import cv2
+from dotenv import load_dotenv
+
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(BASE_DIR)
+load_dotenv(os.path.join(PROJECT_DIR, ".env"), override=True)
+
+AWS_REGION = (
+    os.getenv("AWS_REGION") or
+    os.getenv("AWS_DEFAULT_REGION") or
+    "ap-south-1"
+)
 
 # ----------------------------
 # AWS Rekognition Client
 # ----------------------------
 client = boto3.client(
     "rekognition",
-    region_name="ap-south-1"
+    region_name=AWS_REGION
 )
 
 # ----------------------------
 # Config
 # ----------------------------
 PROJECT_VERSION_ARN = (
-    "arn:aws:rekognition:ap-south-1:364598914440:project/package-recognition/version/package-recognition.2026-05-21T12.01.54/1779345114953"
+    os.getenv("REKOGNITION_PROJECT_VERSION_ARN") or
+    "arn:aws:rekognition:us-east-1:794562053797:project/package_detection/version/package_detection.2026-05-21T15.04.32/1779356072212"
 )
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
+# arn:aws:rekognition:ap-south-1:364598914440:project/package-recognition/version/package-recognition.2026-05-21T12.01.54/1779345114953
 TEST_FOLDER = os.path.join(BASE_DIR, "test")
 
 OUTPUT_FOLDER = os.path.join(BASE_DIR, "output")
