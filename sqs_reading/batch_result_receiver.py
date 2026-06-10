@@ -22,6 +22,18 @@ DEFAULT_FORCE_CONSUME_AFTER_BATCHES = 80
 
 logger = logging.getLogger(__name__)
 
+import cv2
+import numpy as np
+
+from video_rekognition_feed import (
+    create_tracker,
+    labels_to_tracker_detections,
+    update_tracker,
+    update_entry_exit_state,
+    remove_lost_objects,
+    remove_stale_tracks,
+)
+
 
 def get_aws_region(region_name=None):
     return (
@@ -246,6 +258,27 @@ def download_json_from_s3(bucket, key, s3_client=None, region_name=None):
         raise
 
 
+def download_image_from_s3(bucket, key, s3_client=None, region_name=None):
+    """Download an image from S3 and return it as a BGR numpy array (cv2 image)."""
+    s3 = s3_client or create_s3_client(region_name)
+
+    try:
+        response = s3.get_object(Bucket=bucket, Key=key)
+    except ClientError:
+        logger.exception("Failed to get s3://%s/%s", bucket, key)
+        raise
+
+    body = response["Body"].read()
+    arr = np.frombuffer(body, dtype=np.uint8)
+    img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+    if img is None:
+        logger.error("Could not decode image s3://%s/%s", bucket, key)
+        raise RuntimeError(f"Could not decode image s3://{bucket}/{key}")
+
+    return img
+
+
 def consume_ordered_queue(
     state_path=DEFAULT_STATE_PATH,
     process_fn=None,
@@ -301,6 +334,90 @@ def consume_ordered_queue(
         except Exception:
             logger.exception("process_fn raised an exception for batch %s", batch.get("batch_id"))
             raise
+
+
+def _default_output_path(batch_id):
+    out_dir = Path(__file__).resolve().parent / "output"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    return out_dir / f"batch_{batch_id}_counts.json"
+
+
+def consume_and_track_batches(
+    state_path=DEFAULT_STATE_PATH,
+    region_name=None,
+    s3_client=None,
+    stop_when_empty=False,
+    output_path_fn=None
+):
+    """Consume ordered batches and process them with ByteTrack tracking.
+
+    Writes a per-batch JSON containing updated counts and prints the counts.
+    """
+    s3 = s3_client or create_s3_client(region_name)
+
+    tracker = create_tracker()
+    tracked_objects = {}
+    counts = {"in": 0, "out": 0}
+
+    def process_fn(batch, downloaded_results):
+        batch_id = batch.get("batch_id")
+        batch_results = []
+
+        for entry, payload in zip(batch.get("results", []), downloaded_results):
+            image_key = entry.get("image_key") or entry.get("imageKey")
+            result_key = entry.get("result_key") or entry.get("resultKey") or entry.get("manifest_key")
+
+            frame = None
+            if image_key:
+                try:
+                    frame = download_image_from_s3(batch.get("bucket"), image_key, s3_client=s3)
+                except Exception:
+                    logger.exception("Failed to download image for batch %s key %s", batch_id, image_key)
+                    frame = None
+
+            if payload is None:
+                custom_labels = []
+            else:
+                custom_labels = payload.get("CustomLabels", [])
+
+            if frame is None:
+                tracks = []
+            else:
+                h, w = frame.shape[:2]
+                detections = labels_to_tracker_detections(custom_labels, w, h)
+                tracks = update_tracker(tracker, detections, frame)
+
+                removed_ids = remove_lost_objects(tracked_objects, counts)
+                tracks = remove_stale_tracks(tracks, removed_ids)
+                update_entry_exit_state(tracks, tracked_objects, w, h, counts)
+
+            batch_results.append({
+                "image_key": image_key,
+                "result_key": result_key,
+                "detections": custom_labels,
+                "tracks": tracks.tolist() if hasattr(tracks, "tolist") else []
+            })
+
+        out_path = (output_path_fn(batch_id) if output_path_fn else _default_output_path(batch_id))
+        payload = {
+            "batch_id": batch_id,
+            "processed_at_epoch": time.time(),
+            "counts": counts,
+            "results": batch_results
+        }
+
+        with out_path.open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2)
+
+        print(f"Processed batch {batch_id}: IN={counts['in']} OUT={counts['out']}")
+
+    consume_ordered_queue(
+        state_path=state_path,
+        process_fn=process_fn,
+        s3_client=s3,
+        region_name=region_name,
+        stop_when_empty=stop_when_empty
+    )
 
 
 def delete_message(client, queue_url, receipt_handle):
@@ -403,6 +520,11 @@ def parse_args():
         help="Pop and print the next locally buffered batch for the tracking service."
     )
     parser.add_argument(
+        "--consume-and-track",
+        action="store_true",
+        help="Consume ordered batches and run ByteTrack analysis, writing per-batch JSONs."
+    )
+    parser.add_argument(
         "--force-after-batches",
         type=int,
         default=DEFAULT_FORCE_CONSUME_AFTER_BATCHES,
@@ -425,6 +547,14 @@ def main():
         )
         if batch is not None:
             print(json.dumps(batch, indent=2))
+        return
+
+    if args.consume_and_track:
+        consume_and_track_batches(
+            state_path=args.state_path,
+            region_name=args.region,
+            stop_when_empty=args.once
+        )
         return
 
     poll_queue(
