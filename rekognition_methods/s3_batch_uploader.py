@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import boto3
 import cv2
+import requests
 from dotenv import load_dotenv
 
 
@@ -15,6 +16,11 @@ AWS_REGION_ENV = "AWS_REGION"
 AWS_DEFAULT_REGION_ENV = "AWS_DEFAULT_REGION"
 S3_PREFIX_ENV = "S3_FRAME_PREFIX"
 JPEG_QUALITY_ENV = "S3_FRAME_JPEG_QUALITY"
+CONFIRMATION_URL_ENV = "S3_UPLOAD_CONFIRMATION_URL"
+DEFAULT_CONFIRMATION_URL = (
+    "https://t4z7rn5u4l.execute-api.us-east-1.amazonaws.com/"
+    "default/confirmationService"
+)
 
 
 def get_env_value(name, default=None):
@@ -75,12 +81,17 @@ class S3BatchUploader:
         bucket_name=None,
         prefix=None,
         region_name=None,
-        jpeg_quality=None
+        jpeg_quality=None,
+        confirmation_url=None
     ):
         self.bucket_name = bucket_name or get_env_value(S3_BUCKET_ENV)
         self.prefix = get_s3_prefix(prefix)
         self.jpeg_quality = get_jpeg_quality(jpeg_quality)
         self.region_name = get_aws_region(region_name)
+        self.confirmation_url = (
+            confirmation_url or
+            get_env_value(CONFIRMATION_URL_ENV, DEFAULT_CONFIRMATION_URL)
+        )
         self.client = boto3.client("s3", region_name=self.region_name)
 
         if not self.bucket_name:
@@ -142,6 +153,8 @@ class S3BatchUploader:
                 "created-at-utc": batch.created_at_utc
             }
         )
+
+        self._send_confirmation(manifest)
 
         return UploadedBatch(
             run_id=batch.run_id,
@@ -208,3 +221,79 @@ class S3BatchUploader:
                 for frame in uploaded_frames
             ]
         }
+
+    def _send_confirmation(self, manifest):
+        image_keys = [frame["key"] for frame in manifest["frames"]]
+        frame_paths = [
+            f"s3://{frame['bucket']}/{frame['key']}"
+            for frame in manifest["frames"]
+        ]
+        payload = {
+            "run_id": manifest["run_id"],
+            "batch_id": manifest["batch_id"],
+            "created_at_epoch": manifest["created_at_epoch"],
+            "created_at_utc": manifest["created_at_utc"],
+            "bucket": manifest["bucket"],
+            "prefix": manifest["prefix"],
+            "manifest_key": manifest["manifest_key"],
+            "manifest_path": (
+                f"s3://{manifest['bucket']}/{manifest['manifest_key']}"
+            ),
+            "images": image_keys,
+            "image_keys": image_keys,
+            "image_paths": frame_paths,
+            "image_details": [
+                {
+                    "run_id": frame["run_id"],
+                    "sequence_id": frame["sequence_id"],
+                    "batch_id": frame["batch_id"],
+                    "batch_index": frame["batch_index"],
+                    "captured_at_epoch": frame["captured_at_epoch"],
+                    "captured_at_utc": frame["captured_at_utc"],
+                    "bucket": frame["bucket"],
+                    "key": frame["key"],
+                    "path": f"s3://{frame['bucket']}/{frame['key']}"
+                }
+                for frame in manifest["frames"]
+            ]
+        }
+
+        print(
+            "Sending upload confirmation: "
+            f"url={self.confirmation_url} "
+            f"bucket={payload['bucket']} "
+            f"batch_id={payload['batch_id']} "
+            f"images={len(payload['images'])}"
+        )
+        print(
+            "Confirmation image keys: "
+            f"{json.dumps(payload['images'])}"
+        )
+
+        try:
+            response = requests.post(
+                self.confirmation_url,
+                json=payload,
+                timeout=10
+            )
+            print(
+                "Confirmation response: "
+                f"status={response.status_code} "
+                f"body={response.text[:1000]}"
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            response = getattr(exc, "response", None)
+            if response is not None:
+                print(
+                    "Confirmation request failed: "
+                    f"status={response.status_code} "
+                    f"body={response.text[:1000]}"
+                )
+            else:
+                print(f"Confirmation request failed before response: {exc}")
+            print(
+                "Confirmation payload: "
+                f"{json.dumps(payload)[:4000]}"
+            )
+            raise

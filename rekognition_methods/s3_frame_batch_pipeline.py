@@ -3,6 +3,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import cv2
+import requests
+import os
+import json
+import logging
+import boto3
+from botocore.exceptions import ClientError
 
 try:
     from frame_batcher import (
