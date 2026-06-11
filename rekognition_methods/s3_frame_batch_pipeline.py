@@ -61,8 +61,7 @@ def draw_upload_status(
     status = (
         f"Frame {captured_frame.sequence_id} | "
         f"Run {captured_frame.run_id} | "
-        f"Batch {captured_frame.batch_id} | "
-        f"{buffered_count}/{BATCH_SIZE} buffered | "
+        f"Batch {captured_frame.batch_id:08d} | "
         f"{SAMPLE_INTERVAL_SECONDS:.1f}s sample"
     )
     cv2.putText(
@@ -123,10 +122,10 @@ def main():
                     try:
                         uploaded_batch = in_flight_upload.result()
                         upload_status = (
-                            f"Uploaded batch {uploaded_batch.batch_id}"
+                            f"Uploaded batch {uploaded_batch.batch_id:08d}"
                         )
                         print(
-                            f"Uploaded batch {uploaded_batch.batch_id}: "
+                            f"Uploaded batch {uploaded_batch.batch_id:08d}: "
                             f"{uploaded_batch.manifest_key}"
                         )
                     except Exception as exc:
@@ -143,12 +142,14 @@ def main():
                     batch_frames = frame_buffer[:BATCH_SIZE]
                     del frame_buffer[:BATCH_SIZE]
                     batch = create_batch(batch_frames)
-                    upload_status = f"Uploading batch {batch.batch_id} to S3..."
+                    upload_status = (
+                        f"Uploading batch {batch.batch_id:08d} to S3..."
+                    )
                     uploaded_batch = None
                     upload_error = None
 
                     print(
-                        f"Uploading batch {batch.batch_id} "
+                        f"Uploading batch {batch.batch_id:08d} "
                         f"({len(batch.frames)} frames) created at "
                         f"{batch.created_at_utc}"
                     )

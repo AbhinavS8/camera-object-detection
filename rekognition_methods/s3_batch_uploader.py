@@ -105,6 +105,15 @@ class S3BatchUploader:
             f"region={self.region_name}"
         )
 
+    @staticmethod
+    def _format_batch_id(batch_id):
+        return f"{batch_id:08d}"
+
+    def _format_confirmation_payload(self, manifest):
+        payload = dict(manifest)
+        payload["batch_id"] = self._format_batch_id(manifest["batch_id"])
+        return payload
+
     def upload_batch(self, batch):
         uploaded_frames = []
 
@@ -223,51 +232,39 @@ class S3BatchUploader:
         }
 
     def _send_confirmation(self, manifest):
+        payload = self._format_confirmation_payload(manifest)
         image_keys = [frame["key"] for frame in manifest["frames"]]
         frame_paths = [
             f"s3://{frame['bucket']}/{frame['key']}"
             for frame in manifest["frames"]
         ]
-        payload = {
-            "run_id": manifest["run_id"],
-            "batch_id": manifest["batch_id"],
-            "created_at_epoch": manifest["created_at_epoch"],
-            "created_at_utc": manifest["created_at_utc"],
-            "bucket": manifest["bucket"],
-            "prefix": manifest["prefix"],
-            "manifest_key": manifest["manifest_key"],
-            "manifest_path": (
-                f"s3://{manifest['bucket']}/{manifest['manifest_key']}"
-            ),
-            "images": image_keys,
-            "image_keys": image_keys,
-            "image_paths": frame_paths,
-            "image_details": [
-                {
-                    "run_id": frame["run_id"],
-                    "sequence_id": frame["sequence_id"],
-                    "batch_id": frame["batch_id"],
-                    "batch_index": frame["batch_index"],
-                    "captured_at_epoch": frame["captured_at_epoch"],
-                    "captured_at_utc": frame["captured_at_utc"],
-                    "bucket": frame["bucket"],
-                    "key": frame["key"],
-                    "path": f"s3://{frame['bucket']}/{frame['key']}"
-                }
-                for frame in manifest["frames"]
-            ]
-        }
+        payload["manifest_path"] = (
+            f"s3://{manifest['bucket']}/{manifest['manifest_key']}"
+        )
+        payload["images"] = image_keys
+        payload["image_keys"] = image_keys
+        payload["image_paths"] = frame_paths
+        payload["image_details"] = [
+            {
+                "run_id": frame["run_id"],
+                "sequence_id": frame["sequence_id"],
+                "batch_id": self._format_batch_id(frame["batch_id"]),
+                "batch_index": frame["batch_index"],
+                "captured_at_epoch": frame["captured_at_epoch"],
+                "captured_at_utc": frame["captured_at_utc"],
+                "bucket": frame["bucket"],
+                "key": frame["key"],
+                "path": f"s3://{frame['bucket']}/{frame['key']}"
+            }
+            for frame in manifest["frames"]
+        ]
 
         print(
             "Sending upload confirmation: "
             f"url={self.confirmation_url} "
             f"bucket={payload['bucket']} "
-            f"batch_id={payload['batch_id']} "
+            f"batch_id={self._format_batch_id(payload['batch_id'])} "
             f"images={len(payload['images'])}"
-        )
-        print(
-            "Confirmation image keys: "
-            f"{json.dumps(payload['images'])}"
         )
 
         try:
@@ -292,8 +289,4 @@ class S3BatchUploader:
                 )
             else:
                 print(f"Confirmation request failed before response: {exc}")
-            print(
-                "Confirmation payload: "
-                f"{json.dumps(payload)[:4000]}"
-            )
             raise

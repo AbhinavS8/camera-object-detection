@@ -47,6 +47,10 @@ class S3BatchUploader:
         self.client = boto3.client("s3", region_name=self.region_name)
         logger.info(f"S3 Uploader Initialized. Target: s3://{self.bucket_name}/{self.prefix}/")
 
+    @staticmethod
+    def _format_batch_id(batch_id):
+        return f"{batch_id:08d}"
+
     def upload_batch(self, batch) -> UploadedBatch:
         """Uploads frames to S3 and triggers the API Gateway manifest signal."""
         uploaded_frames = []
@@ -124,7 +128,7 @@ class S3BatchUploader:
         """Creates the JSON payload structure expected by the API Gateway Lambda."""
         return {
             "run_id": batch.run_id,
-            "batch_id": batch.batch_id,
+            "batch_id": self._format_batch_id(batch.batch_id),
             "created_at_epoch": batch.created_at_epoch,
             "created_at_utc": batch.created_at_utc,
             "bucket": self.bucket_name,
