@@ -207,7 +207,11 @@ def consume_and_track_batches(state_path=DEFAULT_STATE_PATH, region_name=None, s
             if result_key:
                 try:
                     payload = download_json_from_s3(batch["bucket"], result_key, s3_client=s3)
-                    custom_labels = payload.get("CustomLabels", [])
+                    custom_labels = (
+                        payload.get("CustomLabels")
+                        or payload.get("rekognition_response", {}).get("CustomLabels")
+                        or []
+                    )
                 except Exception:
                     logger.exception("Could not load result JSON for batch %s key %s", batch.get("batch_id"), result_key)
 

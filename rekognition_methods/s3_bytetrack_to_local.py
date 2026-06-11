@@ -200,11 +200,11 @@ def read_image_from_s3(s3_client, bucket, key):
 
 def create_tracker(frame_rate):
     args = SimpleNamespace(
-        track_high_thresh=0.2,
-        track_low_thresh=0.05,
-        new_track_thresh=0.2,
-        track_buffer=30,
-        match_thresh=0.8,
+        track_high_thresh=0.05,
+        track_low_thresh=0.001,
+        new_track_thresh=0.05,
+        track_buffer=80,
+        match_thresh=0.3,
         fuse_score=True,
         mot20=False
     )

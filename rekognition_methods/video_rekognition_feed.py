@@ -66,7 +66,8 @@ class ArrayAdapter:
 
 
 class TrackerDetections:
-    def __init__(self, xywh, conf, cls):
+    def __init__(self, xyxy, xywh, conf, cls):
+        self.xyxy = ArrayAdapter(xyxy)
         self.xywh = ArrayAdapter(xywh)
         self.conf = ArrayAdapter(conf)
         self.cls = ArrayAdapter(cls)
@@ -85,6 +86,7 @@ class TrackerDetections:
             return self
 
         return TrackerDetections(
+            self.xyxy.values[item],
             self.xywh.values[item],
             self.conf.values[item],
             self.cls.values[item]
@@ -93,11 +95,11 @@ class TrackerDetections:
 
 def create_tracker():
     args = SimpleNamespace(
-        track_high_thresh=0.2,
-        track_low_thresh=0.05,
-        new_track_thresh=0.2,
-        track_buffer=30,
-        match_thresh=0.8,
+        track_high_thresh=0.05,
+        track_low_thresh=0.001,
+        new_track_thresh=0.05,
+        track_buffer=80,
+        match_thresh=0.3,
         fuse_score=True,
         mot20=False
     )
@@ -152,6 +154,7 @@ def detect_frame(frame):
 
 
 def labels_to_tracker_detections(custom_labels, frame_width, frame_height):
+    xyxy = []
     xywh = []
     confidences = []
     class_ids = []
@@ -166,15 +169,19 @@ def labels_to_tracker_detections(custom_labels, frame_width, frame_height):
         top = box["Top"] * frame_height
         width = box["Width"] * frame_width
         height = box["Height"] * frame_height
+        right = left + width
+        bottom = top + height
 
         center_x = left + width / 2
         center_y = top + height / 2
 
+        xyxy.append([left, top, right, bottom])
         xywh.append([center_x, center_y, width, height])
         confidences.append(label["Confidence"] / 100.0)
         class_ids.append(0)
 
     return TrackerDetections(
+        np.array(xyxy, dtype=np.float32).reshape(-1, 4),
         np.array(xywh, dtype=np.float32).reshape(-1, 4),
         np.array(confidences, dtype=np.float32),
         np.array(class_ids, dtype=np.float32)
