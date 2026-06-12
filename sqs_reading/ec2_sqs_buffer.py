@@ -243,7 +243,7 @@ def poll_queue(
     wait_time=20,
     idle_sleep_seconds=2,
     reset_on_start=True,
-    reset_after_idle_seconds=20,
+    reset_after_idle_seconds=35,
 ):
     client = create_sqs_client(region_name)
 

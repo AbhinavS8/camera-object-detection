@@ -15,10 +15,17 @@ FRAME_HEIGHT = 720
 TRACKER_FRAME_RATE = int(1 / SAMPLE_INTERVAL_SECONDS)
 
 EDGE_MARGIN_RATIO = 0.2
-MIN_TRACK_TIME = 0.3
-MIN_INSIDE_FRAMES = 2
-MIN_EXIT_TRACK_TIME = 0.8
-MAX_DISAPPEARED_TIME = 1.5
+# MIN_TRACK_TIME = 0.3
+# MIN_INSIDE_FRAMES = 2
+# MIN_EXIT_TRACK_TIME = 0.8
+
+SAMPLE_INTERVAL_SECONDS = 0.2
+
+MIN_TRACK_FRAMES = 2      # 0.4 sec
+MIN_EXIT_FRAMES = 4       # 0.8 sec
+MAX_MISSING_FRAMES = 8    # 1.6 sec
+
+MAX_DISAPPEARED_TIME = 4
 
 
 class ArrayAdapter:
@@ -87,7 +94,10 @@ class TrackerDetections:
             self.cls.values[item]
         )
 
-
+def age_tracks(tracked_objects):
+    for obj in tracked_objects.values():
+        obj["frames_missing"] += 1
+        
 def create_tracker():
     args = SimpleNamespace(
         track_high_thresh=0.2,
@@ -223,8 +233,8 @@ def update_entry_exit_state(tracks, tracked_objects, frame_width, frame_height, 
 
         if track_id not in tracked_objects:
             tracked_objects[track_id] = {
-                "first_seen": current_time,
-                "last_seen": current_time,
+                "frames_seen": 1,
+                "frames_missing": 0,
                 "confidence": confidence,
                 "first_edge_zones": edge_zones,
                 "last_edge_zones": edge_zones,
@@ -235,7 +245,9 @@ def update_entry_exit_state(tracks, tracked_objects, frame_width, frame_height, 
             }
         else:
             tracked_object = tracked_objects[track_id]
-            tracked_object["last_seen"] = current_time
+
+            tracked_object["frames_seen"] += 1
+            tracked_object["frames_missing"] = 0
             tracked_object["confidence"] = confidence
             tracked_object["last_edge_zones"] = edge_zones
 
@@ -246,13 +258,15 @@ def update_entry_exit_state(tracks, tracked_objects, frame_width, frame_height, 
                     tracked_object["has_been_inside"] = True
 
         tracked_object = tracked_objects[track_id]
-        track_time = current_time - tracked_object["first_seen"]
-
+        track_time = (
+            tracked_object["frames_seen"]
+            * SAMPLE_INTERVAL_SECONDS
+        )
         if (
             not tracked_object["entered"] and
             tracked_object["first_edge_zones"] and
             tracked_object["has_been_inside"] and
-            track_time >= MIN_TRACK_TIME
+            tracked_object["frames_seen"] >= MIN_TRACK_FRAMES
         ):
             counts["in"] += 1
             tracked_object["entered"] = True
@@ -272,12 +286,14 @@ def remove_lost_objects(tracked_objects, counts):
         if current_time - data["last_seen"] <= MAX_DISAPPEARED_TIME:
             continue
 
-        total_time = data["last_seen"] - data["first_seen"]
-
+        total_time = (
+            data["frames_seen"]
+            * SAMPLE_INTERVAL_SECONDS
+        )
         if (
             data["has_been_inside"] and
             data["last_edge_zones"] and
-            total_time >= MIN_EXIT_TRACK_TIME and
+            data["frames_seen"] >= MIN_EXIT_FRAMES and
             not data["exited"]
         ):
             counts["out"] += 1

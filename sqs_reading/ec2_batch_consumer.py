@@ -11,24 +11,26 @@ import numpy as np
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
-try:
-    from sqs_reading.ec2_bytetrack_helpers import (
-        create_tracker,
-        labels_to_tracker_detections,
-        update_tracker,
-        update_entry_exit_state,
-        remove_lost_objects,
-        remove_stale_tracks,
-    )
-except ImportError:
-    from ec2_bytetrack_helpers import (
-        create_tracker,
-        labels_to_tracker_detections,
-        update_tracker,
-        update_entry_exit_state,
-        remove_lost_objects,
-        remove_stale_tracks,
-    )
+# try:
+#     from sqs_reading.ec2_bytetrack_helpers import (
+#         create_tracker,
+#         labels_to_tracker_detections,
+#         update_tracker,
+#         update_entry_exit_state,
+#         remove_lost_objects,
+#         remove_stale_tracks,
+#         age_tracks,
+#     )
+# except ImportError:
+#     from ec2_bytetrack_helpers import (
+#         create_tracker,
+#         labels_to_tracker_detections,
+#         update_tracker,
+#         update_entry_exit_state,
+#         remove_lost_objects,
+#         remove_stale_tracks,
+#         age_tracks,
+#     )
 
 
 PROJECT_DIR = Path(__file__).resolve().parents[1]
@@ -183,74 +185,211 @@ def _default_output_path(batch_id):
     return DEFAULT_OUTPUT_DIR / f"batch_{batch_id}_counts.json"
 
 
-def consume_and_track_batches(state_path=DEFAULT_STATE_PATH, region_name=None, stop_when_empty=False):
+# def consume_and_track_batches(state_path=DEFAULT_STATE_PATH, region_name=None, stop_when_empty=False):
+#     s3 = create_s3_client(region_name)
+#     tracker = create_tracker()
+#     tracked_objects = {}
+#     counts = {"in": 0, "out": 0}
+#     state = reset_batch_state(state_path)
+
+#     while True:
+#         batch = consume_next_batch(state_path=state_path)
+#         if batch is None:
+#             if stop_when_empty:
+#                 return
+#             time.sleep(1)
+#             continue
+
+#         batch_results = []
+#         for entry in batch.get("results", []):
+#             image_key = entry.get("image_key") or entry.get("imageKey")
+#             result_key = entry.get("result_key") or entry.get("resultKey") or entry.get("manifest_key")
+#             custom_labels = []
+
+#             if result_key:
+#                 try:
+#                     payload = download_json_from_s3(batch["bucket"], result_key, s3_client=s3)
+#                     custom_labels = (
+#                         payload.get("CustomLabels")
+#                         or payload.get("rekognition_response", {}).get("CustomLabels")
+#                         or []
+#                     )
+#                 except Exception:
+#                     logger.exception("Could not load result JSON for batch %s key %s", batch.get("batch_id"), result_key)
+
+#             tracks = []
+#             if image_key:
+#                 try:
+#                     frame = download_image_from_s3(batch["bucket"], image_key, s3_client=s3)
+#                     h, w = frame.shape[:2]
+#                     detections = labels_to_tracker_detections(custom_labels, w, h)
+#                     age_tracks(tracked_objects)
+
+#                     tracks = update_tracker(tracker, detections, frame)
+#                     removed_ids = remove_lost_objects(tracked_objects, counts)
+#                     tracks = remove_stale_tracks(tracks, removed_ids)
+#                     update_entry_exit_state(tracks, tracked_objects, w, h, counts)
+#                 except Exception:
+#                     logger.exception("Could not process batch %s image %s", batch.get("batch_id"), image_key)
+
+#             batch_results.append({
+#                 "image_key": image_key,
+#                 "result_key": result_key,
+#                 "tracks": tracks.tolist() if hasattr(tracks, "tolist") else [],
+#                 "detections": custom_labels,
+#             })
+
+#         output_path = _default_output_path(batch["batch_id"])
+#         output_payload = {
+#             "batch_id": batch["batch_id"],
+#             "processed_at_epoch": time.time(),
+#             "counts": counts,
+#             "results": batch_results,
+#         }
+#         output_path.write_text(json.dumps(output_payload, indent=2) + "\n", encoding="utf-8")
+#         upload_json_to_s3(
+#             batch["bucket"],
+#             DEFAULT_RESULTS_KEY,
+#             output_payload,
+#             s3_client=s3,
+#         )
+#         print(f"Processed batch {batch['batch_id']}: IN={counts['in']} OUT={counts['out']}")
+
+def consume_and_track_batches(
+    state_path=DEFAULT_STATE_PATH,
+    region_name=None,
+    stop_when_empty=False,
+):
     s3 = create_s3_client(region_name)
-    tracker = create_tracker()
-    tracked_objects = {}
-    counts = {"in": 0, "out": 0}
-    state = reset_batch_state(state_path)
+
+    reset_batch_state(state_path)
+
+    counts = {
+        "in": 0,
+        "out": 0,
+    }
+
+    current_package_count = 0
 
     while True:
         batch = consume_next_batch(state_path=state_path)
+
         if batch is None:
             if stop_when_empty:
                 return
+
             time.sleep(1)
             continue
 
         batch_results = []
+        batch_package_count = 0
+
         for entry in batch.get("results", []):
-            image_key = entry.get("image_key") or entry.get("imageKey")
-            result_key = entry.get("result_key") or entry.get("resultKey") or entry.get("manifest_key")
+            image_key = (
+                entry.get("image_key")
+                or entry.get("imageKey")
+            )
+
+            result_key = (
+                entry.get("result_key")
+                or entry.get("resultKey")
+                or entry.get("manifest_key")
+            )
+
             custom_labels = []
 
             if result_key:
                 try:
-                    payload = download_json_from_s3(batch["bucket"], result_key, s3_client=s3)
+                    payload = download_json_from_s3(
+                        batch["bucket"],
+                        result_key,
+                        s3_client=s3,
+                    )
+
                     custom_labels = (
                         payload.get("CustomLabels")
-                        or payload.get("rekognition_response", {}).get("CustomLabels")
+                        or payload.get(
+                            "rekognition_response",
+                            {}
+                        ).get("CustomLabels")
                         or []
                     )
+
                 except Exception:
-                    logger.exception("Could not load result JSON for batch %s key %s", batch.get("batch_id"), result_key)
+                    logger.exception(
+                        "Could not load result JSON for batch %s key %s",
+                        batch.get("batch_id"),
+                        result_key,
+                    )
 
-            tracks = []
-            if image_key:
-                try:
-                    frame = download_image_from_s3(batch["bucket"], image_key, s3_client=s3)
-                    h, w = frame.shape[:2]
-                    detections = labels_to_tracker_detections(custom_labels, w, h)
-                    tracks = update_tracker(tracker, detections, frame)
-                    removed_ids = remove_lost_objects(tracked_objects, counts)
-                    tracks = remove_stale_tracks(tracks, removed_ids)
-                    update_entry_exit_state(tracks, tracked_objects, w, h, counts)
-                except Exception:
-                    logger.exception("Could not process batch %s image %s", batch.get("batch_id"), image_key)
+            package_count = len(custom_labels)
 
-            batch_results.append({
-                "image_key": image_key,
-                "result_key": result_key,
-                "tracks": tracks.tolist() if hasattr(tracks, "tolist") else [],
-                "detections": custom_labels,
-            })
+            batch_package_count = max(
+                batch_package_count,
+                package_count,
+            )
 
-        output_path = _default_output_path(batch["batch_id"])
+            batch_results.append(
+                {
+                    "image_key": image_key,
+                    "result_key": result_key,
+                    "package_count": package_count,
+                    "detections": custom_labels,
+                }
+            )
+
+        #
+        # Occupancy-based IN/OUT counting
+        #
+
+        if batch_package_count > current_package_count:
+            counts["in"] += (
+                batch_package_count
+                - current_package_count
+            )
+
+        elif batch_package_count < current_package_count:
+            counts["out"] += (
+                current_package_count
+                - batch_package_count
+            )
+
+        current_package_count = batch_package_count
+
         output_payload = {
             "batch_id": batch["batch_id"],
             "processed_at_epoch": time.time(),
+            "current_package_count": current_package_count,
             "counts": counts,
             "results": batch_results,
         }
-        output_path.write_text(json.dumps(output_payload, indent=2) + "\n", encoding="utf-8")
+
+        output_path = _default_output_path(
+            batch["batch_id"]
+        )
+
+        output_path.write_text(
+            json.dumps(
+                output_payload,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
         upload_json_to_s3(
             batch["bucket"],
             DEFAULT_RESULTS_KEY,
             output_payload,
             s3_client=s3,
         )
-        print(f"Processed batch {batch['batch_id']}: IN={counts['in']} OUT={counts['out']}")
 
+        print(
+            f"Batch {batch['batch_id']}: "
+            f"CURRENT={current_package_count} "
+            f"IN={counts['in']} "
+            f"OUT={counts['out']}"
+        )
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Consume ordered batch results and run ByteTrack analysis on EC2.")
