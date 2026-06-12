@@ -46,29 +46,6 @@ The system uploads batches of frames from an RTSP camera to Amazon S3, performs 
 
 Helper modules used by the uploader.
 
-#### `config.py`
-
-Central configuration file for:
-- AWS settings
-- batching parameters
-- queue names
-- bucket names
-- runtime configuration
-
-#### `frame_batcher.py`
-
-Handles:
-- frame collection
-- batch generation
-- timestamp management
-- batch organization
-
-#### `s3_batch_uploader.py`
-
-Uploads generated frame batches to Amazon S3.
-
----
-
 ### main.py
 
 Entry point for the uploader.
@@ -144,7 +121,7 @@ Tracking Queue
 
 ## EC2 Tracking Services
 
-The tracking subsystem runs as long-running processes on an EC2 instance.
+The tracking subsystem runs as long-running processes on an EC2 instance. Uses EC2 instead of Lambda to persist tracking state over time.
 
 ### ec2_sqs_buffer.py
 
@@ -159,7 +136,6 @@ Responsibilities:
 
 This acts as the ingestion layer for the tracker.
 
----
 
 ### ec2_batch_consumer.py
 
@@ -178,73 +154,6 @@ Responsibilities:
 
 ---
 
-## AWS Services Used
-
-### Amazon S3
-
-Stores:
-
-- uploaded frame batches
-- detection outputs
-- tracking results
-
----
-
-### Amazon SQS
-
-Queues used:
-
-#### Detection Queue
-
-Receives jobs from:
-
-```text
-confirmation_service
-```
-
-Consumed by:
-
-```text
-detection_service
-```
-
----
-
-#### Tracking Queue
-
-Receives jobs from:
-
-```text
-detection_service
-```
-
-Consumed by:
-
-```text
-ec2_sqs_buffer
-```
-
----
-
-### AWS Lambda
-
-Serverless processing for:
-
-- upload confirmation handling
-- detection orchestration
-
----
-
-### Amazon EC2
-
-Runs persistent tracking workers responsible for:
-
-- object tracking
-- line crossing detection
-- counting
-- result generation
-
----
 
 ## Configuration
 
@@ -293,13 +202,7 @@ The repository assumes:
 - Lambda functions are deployed
 - API Gateway endpoint is configured
 - EC2 tracking services are installed and running
+- permissions are given appropriately
 
 EC2 tracking processes are intended to run as background services (e.g. systemd).
 
----
-
-## Future Improvements
-
-- Infrastructure as Code (CloudFormation/Terraform)
-- Containerized tracking workers
-- Multi-camera stream partitioning
