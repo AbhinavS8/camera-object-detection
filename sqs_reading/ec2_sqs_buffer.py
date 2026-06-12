@@ -14,9 +14,7 @@ from dotenv import load_dotenv
 PROJECT_DIR = Path(__file__).resolve().parents[1]
 load_dotenv(PROJECT_DIR / ".env", override=True)
 
-DEFAULT_QUEUE_URL = (
-    "https://sqs.us-east-1.amazonaws.com/794562053797/detectToTrackQueue"
-)
+DEFAULT_QUEUE_URL = os.getenv("DEFAULT_QUEUE_URL")
 DEFAULT_STATE_PATH = Path(__file__).resolve().parent / "ordered_batch_results.json"
 DEFAULT_FORCE_CONSUME_AFTER_BATCHES = 80
 

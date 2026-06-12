@@ -7,10 +7,3 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
-
-output/
-rekognition_methods/
-opencv_methods/
-yolo_methods/
-camera_test.py
-sqs_reading/ec2_bytetrack_helpers.py

@@ -11,34 +11,11 @@ import numpy as np
 from botocore.exceptions import ClientError
 from dotenv import load_dotenv
 
-# try:
-#     from sqs_reading.ec2_bytetrack_helpers import (
-#         create_tracker,
-#         labels_to_tracker_detections,
-#         update_tracker,
-#         update_entry_exit_state,
-#         remove_lost_objects,
-#         remove_stale_tracks,
-#         age_tracks,
-#     )
-# except ImportError:
-#     from ec2_bytetrack_helpers import (
-#         create_tracker,
-#         labels_to_tracker_detections,
-#         update_tracker,
-#         update_entry_exit_state,
-#         remove_lost_objects,
-#         remove_stale_tracks,
-#         age_tracks,
-#     )
 
-
-PROJECT_DIR = Path(__file__).resolve().parents[1]
+PROJECT_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_DIR / ".env", override=True)
 
-DEFAULT_QUEUE_URL = (
-    "https://sqs.us-east-1.amazonaws.com/794562053797/detectToTrackQueue"
-)
+DEFAULT_QUEUE_URL = os.getenv("DEFAULT_QUEUE_URL")
 DEFAULT_STATE_PATH = Path(__file__).resolve().parent / "ordered_batch_results.json"
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 DEFAULT_RESULTS_KEY = "results/ordered_batch_results.json"
@@ -183,77 +160,6 @@ def upload_json_to_s3(bucket, key, payload, s3_client=None, region_name=None):
 def _default_output_path(batch_id):
     DEFAULT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     return DEFAULT_OUTPUT_DIR / f"batch_{batch_id}_counts.json"
-
-
-# def consume_and_track_batches(state_path=DEFAULT_STATE_PATH, region_name=None, stop_when_empty=False):
-#     s3 = create_s3_client(region_name)
-#     tracker = create_tracker()
-#     tracked_objects = {}
-#     counts = {"in": 0, "out": 0}
-#     state = reset_batch_state(state_path)
-
-#     while True:
-#         batch = consume_next_batch(state_path=state_path)
-#         if batch is None:
-#             if stop_when_empty:
-#                 return
-#             time.sleep(1)
-#             continue
-
-#         batch_results = []
-#         for entry in batch.get("results", []):
-#             image_key = entry.get("image_key") or entry.get("imageKey")
-#             result_key = entry.get("result_key") or entry.get("resultKey") or entry.get("manifest_key")
-#             custom_labels = []
-
-#             if result_key:
-#                 try:
-#                     payload = download_json_from_s3(batch["bucket"], result_key, s3_client=s3)
-#                     custom_labels = (
-#                         payload.get("CustomLabels")
-#                         or payload.get("rekognition_response", {}).get("CustomLabels")
-#                         or []
-#                     )
-#                 except Exception:
-#                     logger.exception("Could not load result JSON for batch %s key %s", batch.get("batch_id"), result_key)
-
-#             tracks = []
-#             if image_key:
-#                 try:
-#                     frame = download_image_from_s3(batch["bucket"], image_key, s3_client=s3)
-#                     h, w = frame.shape[:2]
-#                     detections = labels_to_tracker_detections(custom_labels, w, h)
-#                     age_tracks(tracked_objects)
-
-#                     tracks = update_tracker(tracker, detections, frame)
-#                     removed_ids = remove_lost_objects(tracked_objects, counts)
-#                     tracks = remove_stale_tracks(tracks, removed_ids)
-#                     update_entry_exit_state(tracks, tracked_objects, w, h, counts)
-#                 except Exception:
-#                     logger.exception("Could not process batch %s image %s", batch.get("batch_id"), image_key)
-
-#             batch_results.append({
-#                 "image_key": image_key,
-#                 "result_key": result_key,
-#                 "tracks": tracks.tolist() if hasattr(tracks, "tolist") else [],
-#                 "detections": custom_labels,
-#             })
-
-#         output_path = _default_output_path(batch["batch_id"])
-#         output_payload = {
-#             "batch_id": batch["batch_id"],
-#             "processed_at_epoch": time.time(),
-#             "counts": counts,
-#             "results": batch_results,
-#         }
-#         output_path.write_text(json.dumps(output_payload, indent=2) + "\n", encoding="utf-8")
-#         upload_json_to_s3(
-#             batch["bucket"],
-#             DEFAULT_RESULTS_KEY,
-#             output_payload,
-#             s3_client=s3,
-#         )
-#         print(f"Processed batch {batch['batch_id']}: IN={counts['in']} OUT={counts['out']}")
 
 def consume_and_track_batches(
     state_path=DEFAULT_STATE_PATH,
